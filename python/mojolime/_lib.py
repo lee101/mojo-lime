@@ -76,8 +76,6 @@ def build(force: bool = False) -> str:
 
 
 _loaded: ctypes.CDLL | None = None
-_runtime: ctypes.CDLL | None = None
-_runtime_device: int | None = None
 
 
 def lib() -> ctypes.CDLL:
@@ -89,19 +87,6 @@ def lib() -> ctypes.CDLL:
             function.argtypes = argtypes
             function.restype = restype
     return _loaded
-
-
-def parallel_runtime() -> None:
-    global _runtime, _runtime_device
-    if _runtime_device is None:
-        lib()
-        _runtime = ctypes.CDLL("libKGENCompilerRTShared.so")
-        create_device = _runtime.KGEN_CompilerRT_AsyncRT_GetOrCreateCPUDevice
-        create_device.argtypes = []
-        create_device.restype = ctypes.c_void_p
-        _runtime_device = create_device()
-        if not _runtime_device:
-            raise BuildError("failed to initialize Mojo's CPU parallel runtime")
 
 
 def f64(value, *, copy: bool = False) -> np.ndarray:

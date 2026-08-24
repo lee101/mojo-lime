@@ -12,7 +12,13 @@ def dense():
 
 
 def test_exponential_kernel_matches_lime_formula():
-    distances = np.linspace(0, 30, 1000)
+    distances = np.linspace(0, 30, 1003)
+    expected = np.sqrt(np.exp(-(distances ** 2) / 25 ** 2))
+    assert np.allclose(kernels.exponential_kernel(distances, 25), expected, atol=3e-13)
+
+
+def test_exponential_kernel_parallel_threshold_and_tail():
+    distances = np.linspace(0, 30, 1_000_003)
     expected = np.sqrt(np.exp(-(distances ** 2) / 25 ** 2))
     assert np.allclose(kernels.exponential_kernel(distances, 25), expected, atol=3e-13)
 
@@ -55,6 +61,12 @@ def test_euclidean_row_distances(dense):
     assert np.allclose(kernels.row_distances(dense), expected)
 
 
+def test_euclidean_row_distances_parallel_threshold_and_tail():
+    values = np.random.RandomState(17).normal(size=(31_001, 65))
+    expected = np.sqrt(np.square(values - values[0]).sum(axis=1))
+    assert np.allclose(kernels.row_distances(values), expected)
+
+
 def test_cosine_row_distances_including_zero_row():
     values = np.random.RandomState(7).randint(0, 2, size=(200, 31)).astype(float)
     values[0] = 1
@@ -79,7 +91,7 @@ def test_weighted_ridge_matches_sklearn(dense):
     assert np.allclose(local_prediction, expected.predict(dense[:1]), atol=1e-11)
 
 
-@pytest.mark.parametrize("shape", [(63, 7), (4097, 31)])
+@pytest.mark.parametrize("shape", [(63, 7), (10_001, 79)])
 def test_weighted_ridge_serial_and_parallel_simd_tails(shape):
     rng = np.random.RandomState(sum(shape))
     values = rng.normal(size=shape)

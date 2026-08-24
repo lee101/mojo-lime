@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ._lib import addr, f64, i64, lib, parallel_runtime
+from ._lib import addr, f64, i64, lib
 
 
 def _matrix(value, name: str, *, nonempty: bool = True) -> np.ndarray:
@@ -181,7 +181,7 @@ def weighted_ridge(values, labels, weights, alpha: float = 1.0):
     rhs = np.empty(d, dtype=np.float64)
     means = np.empty(d, dtype=np.float64)
     work = n * d * (d + 1) // 2
-    tasks = min(8, n) if work >= 2_000_000 else 1
+    tasks = min(8, n) if work >= 25_000_000 else 1
     row = np.empty((tasks, d), dtype=np.float64)
     partial_gram = (
         np.empty((tasks, d, d), dtype=np.float64) if tasks > 1 else gram
@@ -191,8 +191,6 @@ def weighted_ridge(values, labels, weights, alpha: float = 1.0):
     )
     stats = np.empty(3, dtype=np.float64)
     library = lib()
-    if tasks > 1:
-        parallel_runtime()
     ok = library.ml_weighted_ridge(
         addr(values),
         addr(labels),

@@ -4,12 +4,17 @@ Python owns every allocation. Buffers cross the C ABI as integer addresses and
 are reconstructed here with a concrete mutable origin.
 """
 
+from max.algorithm import parallelize
 from std.math import exp, sqrt
+from std.runtime import initialize_runtime
 from std.sys import simd_width_of
 
 comptime W = simd_width_of[DType.float64]()
 comptime Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
 comptime IPtr = UnsafePointer[Int64, AnyOrigin[mut=True]]
+comptime PARALLEL_TASKS = 8
+comptime KERNEL_PARALLEL_THRESHOLD = 1_000_000
+comptime DISTANCE_PARALLEL_WORK = 2_000_000
 
 
 def p(addr: Int) -> Ptr:
@@ -131,8 +136,8 @@ def accumulate_ridge_parallel(
                         column + 1,
                     )
 
-    for task in range(tasks):
-        accumulate(task)
+    initialize_runtime()
+    parallelize[accumulate](tasks, tasks)
     for task in range(tasks):
         axpy(1.0, rhs_work + task * d, target, d)
         for column in range(d):
@@ -144,14 +149,38 @@ def accumulate_ridge_parallel(
             )
 
 
+def kernel_range(
+    src: Ptr, target: Ptr, start: Int, end: Int, denom: Float64
+):
+    var denominator = SIMD[DType.float64, W](denom)
+    var i = start
+    while i + W <= end:
+        var values = src.load[width=W](i)
+        target.store(i, exp(-(values * values) / denominator))
+        i += W
+    while i < end:
+        var value = src[i]
+        target[i] = exp(-(value * value) / denom)
+        i += 1
+
+
 @export("ml_kernel")
 def ml_kernel(distances: Int, dst: Int, n: Int, width: Float64) abi("C"):
     var src = p(distances)
     var target = p(dst)
     var denom = 2.0 * width * width
-    for i in range(n):
-        var value = src[i]
-        target[i] = exp(-(value * value) / denom)
+    if n >= KERNEL_PARALLEL_THRESHOLD:
+        initialize_runtime()
+
+        @parameter
+        def work(task: Int):
+            var start = task * n // PARALLEL_TASKS
+            var end = (task + 1) * n // PARALLEL_TASKS
+            kernel_range(src, target, start, end, denom)
+
+        parallelize[work](PARALLEL_TASKS, PARALLEL_TASKS)
+    else:
+        kernel_range(src, target, 0, n, denom)
 
 
 @export("ml_affine")
@@ -228,11 +257,10 @@ def ml_affine_standardize(
             j += 1
 
 
-@export("ml_euclidean_rows")
-def ml_euclidean_rows(values: Int, dst: Int, n: Int, d: Int) abi("C"):
-    var x = p(values)
-    var target = p(dst)
-    for r in range(n):
+def euclidean_range(
+    x: Ptr, target: Ptr, start: Int, end: Int, d: Int
+):
+    for r in range(start, end):
         var row = x + r * d
         var acc = SIMD[DType.float64, W](0.0)
         var j = 0
@@ -246,6 +274,24 @@ def ml_euclidean_rows(values: Int, dst: Int, n: Int, d: Int) abi("C"):
             total += diff * diff
             j += 1
         target[r] = sqrt(total)
+
+
+@export("ml_euclidean_rows")
+def ml_euclidean_rows(values: Int, dst: Int, n: Int, d: Int) abi("C"):
+    var x = p(values)
+    var target = p(dst)
+    if n * d >= DISTANCE_PARALLEL_WORK:
+        initialize_runtime()
+
+        @parameter
+        def work(task: Int):
+            var start = task * n // PARALLEL_TASKS
+            var end = (task + 1) * n // PARALLEL_TASKS
+            euclidean_range(x, target, start, end, d)
+
+        parallelize[work](PARALLEL_TASKS, PARALLEL_TASKS)
+    else:
+        euclidean_range(x, target, 0, n, d)
 
 
 @export("ml_cosine_rows")
@@ -338,8 +384,18 @@ def ml_weighted_ridge(
         var wr = w[r]
         sum_weight += wr
         ymean += wr * y[r]
-        for j in range(d):
+        var wr_vector = SIMD[DType.float64, W](wr)
+        var j = 0
+        while j + W <= d:
+            xmean.store(
+                j,
+                xmean.load[width=W](j) +
+                wr_vector * x.load[width=W](r * d + j),
+            )
+            j += W
+        while j < d:
             xmean[j] += wr * x[r * d + j]
+            j += 1
     if sum_weight <= 0.0:
         return 0
     ymean /= sum_weight
