@@ -4,7 +4,6 @@ Python owns every allocation. Buffers cross the C ABI as integer addresses and
 are reconstructed here with a concrete mutable origin.
 """
 
-from std.algorithm import parallelize
 from std.math import exp, sqrt
 from std.sys import simd_width_of
 
@@ -132,7 +131,8 @@ def accumulate_ridge_parallel(
                         column + 1,
                     )
 
-    parallelize[accumulate](tasks)
+    for task in range(tasks):
+        accumulate(task)
     for task in range(tasks):
         axpy(1.0, rhs_work + task * d, target, d)
         for column in range(d):
