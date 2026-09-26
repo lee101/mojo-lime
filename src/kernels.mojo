@@ -4,17 +4,12 @@ Python owns every allocation. Buffers cross the C ABI as integer addresses and
 are reconstructed here with a concrete mutable origin.
 """
 
-from max.algorithm import parallelize
 from std.math import exp, sqrt
-from std.runtime import initialize_runtime
 from std.sys import simd_width_of
 
 comptime W = simd_width_of[DType.float64]()
 comptime Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
 comptime IPtr = UnsafePointer[Int64, AnyOrigin[mut=True]]
-comptime PARALLEL_TASKS = 8
-comptime KERNEL_PARALLEL_THRESHOLD = 1_000_000
-comptime DISTANCE_PARALLEL_WORK = 2_000_000
 
 
 def p(addr: Int) -> Ptr:
@@ -78,7 +73,7 @@ def cholesky_solve(l: Ptr, b: Ptr, d: Int):
         b[i] = value / l[i * d + i]
 
 
-def accumulate_ridge_parallel(
+def accumulate_ridge_task_sums(
     x: Ptr,
     y: Ptr,
     w: Ptr,
@@ -93,8 +88,7 @@ def accumulate_ridge_parallel(
     ymean: Float64,
     tasks: Int,
 ):
-    @parameter
-    def accumulate(task: Int):
+    for task in range(tasks):
         var local_matrix = gram_work + task * d * d
         var local_target = rhs_work + task * d
         for j in range(d * d):
@@ -135,9 +129,6 @@ def accumulate_ridge_parallel(
                         local_matrix + column * d,
                         column + 1,
                     )
-
-    initialize_runtime()
-    parallelize[accumulate](tasks, tasks)
     for task in range(tasks):
         axpy(1.0, rhs_work + task * d, target, d)
         for column in range(d):
@@ -169,18 +160,7 @@ def ml_kernel(distances: Int, dst: Int, n: Int, width: Float64) abi("C"):
     var src = p(distances)
     var target = p(dst)
     var denom = 2.0 * width * width
-    if n >= KERNEL_PARALLEL_THRESHOLD:
-        initialize_runtime()
-
-        @parameter
-        def work(task: Int):
-            var start = task * n // PARALLEL_TASKS
-            var end = (task + 1) * n // PARALLEL_TASKS
-            kernel_range(src, target, start, end, denom)
-
-        parallelize[work](PARALLEL_TASKS, PARALLEL_TASKS)
-    else:
-        kernel_range(src, target, 0, n, denom)
+    kernel_range(src, target, 0, n, denom)
 
 
 @export("ml_affine")
@@ -280,18 +260,7 @@ def euclidean_range(
 def ml_euclidean_rows(values: Int, dst: Int, n: Int, d: Int) abi("C"):
     var x = p(values)
     var target = p(dst)
-    if n * d >= DISTANCE_PARALLEL_WORK:
-        initialize_runtime()
-
-        @parameter
-        def work(task: Int):
-            var start = task * n // PARALLEL_TASKS
-            var end = (task + 1) * n // PARALLEL_TASKS
-            euclidean_range(x, target, start, end, d)
-
-        parallelize[work](PARALLEL_TASKS, PARALLEL_TASKS)
-    else:
-        euclidean_range(x, target, 0, n, d)
+    euclidean_range(x, target, 0, n, d)
 
 
 @export("ml_cosine_rows")
@@ -428,7 +397,7 @@ def ml_weighted_ridge(
                 if factor != 0.0:
                     axpy(factor, row_work, matrix + column * d, column + 1)
     else:
-        accumulate_ridge_parallel(
+        accumulate_ridge_task_sums(
             x,
             y,
             w,
