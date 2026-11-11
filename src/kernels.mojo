@@ -24,7 +24,7 @@ def dot(a: Ptr, b: Ptr, n: Int) -> Float64:
     var acc = SIMD[DType.float64, W](0.0)
     var i = 0
     while i + W <= n:
-        acc += a.load[width=W](i) * b.load[width=W](i)
+        acc += a.unsafe_load[width=W](i) * b.unsafe_load[width=W](i)
         i += W
     var total = acc.reduce_add()
     while i < n:
@@ -37,7 +37,7 @@ def axpy(alpha: Float64, x: Ptr, y: Ptr, n: Int):
     var va = SIMD[DType.float64, W](alpha)
     var i = 0
     while i + W <= n:
-        y.store(i, y.load[width=W](i) + va * x.load[width=W](i))
+        y.store(i, y.unsafe_load[width=W](i) + va * x.unsafe_load[width=W](i))
         i += W
     while i < n:
         y[i] += alpha * x[i]
@@ -103,13 +103,13 @@ def accumulate_ridge_task_sums(
             var j = 0
             while j + W <= d:
                 var centered = (
-                    x.load[width=W](r * d + j) -
-                    xmean.load[width=W](j)
+                    x.unsafe_load[width=W](r * d + j) -
+                    xmean.unsafe_load[width=W](j)
                 )
                 row_work.store(task * d + j, centered)
                 local_target.store(
                     j,
-                    local_target.load[width=W](j) +
+                    local_target.unsafe_load[width=W](j) +
                     SIMD[DType.float64, W](wr * ycentered) * centered,
                 )
                 j += W
@@ -146,7 +146,7 @@ def kernel_range(
     var denominator = SIMD[DType.float64, W](denom)
     var i = start
     while i + W <= end:
-        var values = src.load[width=W](i)
+        var values = src.unsafe_load[width=W](i)
         target.store(i, exp(-(values * values) / denominator))
         i += W
     while i < end:
@@ -213,18 +213,18 @@ def ml_affine_standardize(
         while j + W <= d:
             var unscaled: SIMD[DType.float64, W]
             if r == 0:
-                unscaled = first.load[width=W](j)
+                unscaled = first.unsafe_load[width=W](j)
             else:
                 unscaled = (
-                    data.load[width=W](r * d + j) *
-                    sample_scales.load[width=W](j) +
-                    centers.load[width=W](j)
+                    data.unsafe_load[width=W](r * d + j) *
+                    sample_scales.unsafe_load[width=W](j) +
+                    centers.unsafe_load[width=W](j)
                 )
             unscaled_data.store(r * d + j, unscaled)
             data.store(
                 r * d + j,
-                (unscaled - means.load[width=W](j)) /
-                standard_scales.load[width=W](j),
+                (unscaled - means.unsafe_load[width=W](j)) /
+                standard_scales.unsafe_load[width=W](j),
             )
             j += W
         while j < d:
@@ -245,7 +245,7 @@ def euclidean_range(
         var acc = SIMD[DType.float64, W](0.0)
         var j = 0
         while j + W <= d:
-            var diff = row.load[width=W](j) - x.load[width=W](j)
+            var diff = row.unsafe_load[width=W](j) - x.unsafe_load[width=W](j)
             acc += diff * diff
             j += W
         var total = acc.reduce_add()
@@ -358,8 +358,8 @@ def ml_weighted_ridge(
         while j + W <= d:
             xmean.store(
                 j,
-                xmean.load[width=W](j) +
-                wr_vector * x.load[width=W](r * d + j),
+                xmean.unsafe_load[width=W](j) +
+                wr_vector * x.unsafe_load[width=W](r * d + j),
             )
             j += W
         while j < d:
@@ -380,11 +380,11 @@ def ml_weighted_ridge(
             var ycentered = y[r] - ymean
             var j = 0
             while j + W <= d:
-                var centered = x.load[width=W](r * d + j) - xmean.load[width=W](j)
+                var centered = x.unsafe_load[width=W](r * d + j) - xmean.unsafe_load[width=W](j)
                 row_work.store(j, centered)
                 target.store(
                     j,
-                    target.load[width=W](j) +
+                    target.unsafe_load[width=W](j) +
                     SIMD[DType.float64, W](wr * ycentered) * centered,
                 )
                 j += W
